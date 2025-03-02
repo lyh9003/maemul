@@ -1,43 +1,36 @@
-name: Run Naver News Crawler
+name: Naver Maemul Action Automation
 
 on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 0 * * *'  # 매일 자정 실행 (원하는 시간대로 수정 가능)
+    - cron: '0 * * * *'
 
 jobs:
-  run-crawler:
+  run-script:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          persist-credentials: false
+        uses: actions/checkout@v2
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v2
         with:
           python-version: '3.9'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install requests pandas
 
-      - name: Run the crawler script
+      - name: Run naver_maemul_action.py
         run: python naver_maemul_action.py
-        # 크롤러 스크립트 파일 이름이 naver_maemul_action.py 인지 확인하세요.
 
-      - name: Set remote URL with PAT token
+      - name: Commit trade info CSV
         run: |
-          git remote set-url origin https://${{ secrets.NAVER_NEWS }}@github.com/lyh9003/yong.git
-          git remote -v
-          
-      # (선택사항) 생성된 CSV 파일을 아티팩트로 업로드하여 저장
-      - name: Upload trade info artifact
-        if: always()
-        uses: actions/upload-artifact@v3.1.0
-        with:
-          name: trade-info-csv
-          path: trade_info_*.csv
+          git config --local user.email "lyh9003@gmail.com"
+          git config --local user.name "LeeYongHoon"
+          git add trade_info_*.csv
+          git commit -m "Update trade info CSV file [skip ci]" || echo "No changes to commit"
+          git push origin HEAD:main
