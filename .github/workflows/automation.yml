@@ -31,7 +31,7 @@ jobs:
 
       - name: Set remote URL with PAT token
         run: |
-          git remote set-url origin https://${{ secrets.NAVER_NEWS }}@github.com/lyh9003/yong.git
+          git remote set-url origin https://${{ secrets.NAVER_NEWS }}@github.com/lyh9003/maemul.git
           git remote -v
           
       - name: Commit trade info CSV
