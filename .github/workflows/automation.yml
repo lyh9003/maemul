@@ -1,0 +1,43 @@
+name: Run Naver News Crawler
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * *'  # 매일 자정 실행 (원하는 시간대로 수정 가능)
+
+jobs:
+  run-crawler:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the crawler script
+        run: python naver_maemul_action.py
+        # 크롤러 스크립트 파일 이름이 naver_maemul_action.py 인지 확인하세요.
+
+      - name: Set remote URL with PAT token
+        run: |
+          git remote set-url origin https://${{ secrets.NAVER_NEWS }}@github.com/lyh9003/yong.git
+          git remote -v
+          
+      # (선택사항) 생성된 CSV 파일을 아티팩트로 업로드하여 저장
+      - name: Upload trade info artifact
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: trade-info-csv
+          path: trade_info_*.csv
