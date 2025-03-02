@@ -27,7 +27,7 @@ jobs:
 
       - name: Run the crawler script
         run: python naver_maemul_action.py
-        # 크롤러 스크립트 파일 이름이 naver_maemul_action.py 인지 확인하세요.
+        # 크롤러 스크립트 파일 이름이 naver_maemul_action.py 인지 확인
 
       - name: Set remote URL with PAT token
         run: |
