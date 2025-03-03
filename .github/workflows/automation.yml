@@ -1,10 +1,10 @@
 name: Run Naver News Crawler
 
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch:  # 수동 실행 (GitHub Actions에서 "Run workflow" 버튼으로 실행)
   schedule:
-    - cron: '0 15 * * *'  # 매일 자정 실행 (원하는 시간대로 수정 가능)
+    - cron: '0 15 * * *'  # 매일 한국시간 자정 (UTC 기준 15:00 = 한국시간 00:00)
+
 
 jobs:
   run-crawler:
