@@ -173,7 +173,7 @@ if __name__ == "__main__":
     # 경기도의 모든 군구 정보 가져오기
     gungu_list = get_gungu_info(sido_list.iloc[sido_idx]['cortarNo'])
     # 군구는 전체 선택(즉, 사용자가 군구 선택을 생략)
-    gungu_input = '44. 화성시'
+    gungu_input = '44'
     print("자동 선택된 군구:", gungu_input)
 
     all_trade_info = []  # 모든 거래 정보를 저장할 리스트
@@ -217,6 +217,46 @@ if __name__ == "__main__":
 
     # (만약 개별 군구 선택 로직이 필요없다면 else 부분은 제거해도 됩니다.)
 
+    else:
+    # 개별 군구 선택한 경우
+    gungu_choice = int(gungu_input) - 1
+    selected_gungu = gungu_list.iloc[gungu_choice]['cortarName']
+    dong_list = get_dong_info(gungu_list.iloc[gungu_choice]['cortarNo'])
+    print(f"Select a Dong for Gungu: {selected_gungu}")
+    print("0.전체")
+    for i, dong in enumerate(dong_list.itertuples(), 1):
+        print(f"{i}. {dong.cortarName}")
+    dong_input = input("Enter the number of your choice (or 0 for 전체): ").strip()
+
+    if dong_input == '0':
+        dong_to_process = dong_list
+    else:
+        dong_choice = int(dong_input) - 1
+        dong_to_process = dong_list.iloc[[dong_choice]]
+    
+    # 선택한 군구 내의 동에 대해 처리
+    for _, dong in dong_to_process.iterrows():
+        apt_list = get_apt_list(dong['cortarNo'])
+        print(f"Processing Dong: {dong['cortarName']}")
+        for apt in apt_list.itertuples():
+            print(f"Fetching trade info for: {apt.complexName}")
+            trade_info = get_trade_info(apt.complexNo)
+
+            trade_info['Sido'] = selected_sido
+            trade_info['Gungu'] = selected_gungu
+            trade_info['Dong'] = dong['cortarName']  # 실제 dong 이름 사용
+            trade_info['ComplexName'] = apt.complexName
+
+            cols = ['Sido', 'Gungu', 'Dong', 'ComplexName'] + [col for col in trade_info.columns if col not in ['Sido', 'Gungu', 'Dong', 'ComplexName']]
+            trade_info = trade_info[cols]
+
+            all_trade_info.append(trade_info)
+            print(trade_info)
+            print("\n")
+            time.sleep(random.uniform(4, 5))  # 요청 간 딜레이
+
+
+    
     # 모든 거래 정보를 하나의 DataFrame으로 결합
     combined_trade_info = pd.concat(all_trade_info, ignore_index=True)
 
