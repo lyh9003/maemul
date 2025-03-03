@@ -173,8 +173,8 @@ if __name__ == "__main__":
     # 경기도의 모든 군구 정보 가져오기
     gungu_list = get_gungu_info(sido_list.iloc[sido_idx]['cortarNo'])
     # 군구는 전체 선택(즉, 사용자가 군구 선택을 생략)
-    gungu_input = '0'
-    print("자동으로 전체 군구가 선택되었습니다.")
+    gungu_input = '44'
+    print("자동 선택된 군구:", gungu_input)
 
     all_trade_info = []  # 모든 거래 정보를 저장할 리스트
 
@@ -232,6 +232,8 @@ if __name__ == "__main__":
 
     # CSV 파일로 저장
     current_datetime = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-    filename = f"trade_info_{current_datetime}.csv"
+    filename = f"trade_info_{selected_sido}_{gungu_input}_{current_datetime}.csv"
     combined_trade_info.to_csv(filename, index=False, encoding="utf-8-sig")
     print(f"Trade info saved to {filename}")
+
+    
