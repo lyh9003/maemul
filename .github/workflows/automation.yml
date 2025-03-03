@@ -25,9 +25,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run the crawler script
-        run: python naver_maemul_hwaseong.py
-        # 크롤러 스크립트 파일 이름이 naver_maemul_action.py 인지 확인
+      - name: Run the crawler scripts sequentially (ignore errors)
+        run: |
+          python naver_maemul_hwaseong.py || true
+          python naver_maemul_osan.py || true
+          python naver_maemul_giheong.py || true
+
 
       - name: Set remote URL with PAT token
         run: |
