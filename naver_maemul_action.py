@@ -173,7 +173,7 @@ if __name__ == "__main__":
     # 경기도의 모든 군구 정보 가져오기
     gungu_list = get_gungu_info(sido_list.iloc[sido_idx]['cortarNo'])
     # 군구는 전체 선택(즉, 사용자가 군구 선택을 생략)
-    gungu_input = '44'
+    gungu_input = '화성시'
     print("자동 선택된 군구:", gungu_input)
 
     all_trade_info = []  # 모든 거래 정보를 저장할 리스트
