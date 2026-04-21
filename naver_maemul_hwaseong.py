@@ -49,7 +49,7 @@ def safe_get(url, params=None, headers=None, retries=5):
 
     for attempt in range(retries):
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=50)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', timeout=50)
             if result.returncode == 0 and result.stdout:
                 return _Response(result.stdout)
             print(f'  curl 실패 (시도 {attempt+1}/{retries}, code={result.returncode}): {result.stderr[:150]}')
