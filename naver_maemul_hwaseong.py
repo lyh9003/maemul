@@ -1,6 +1,8 @@
 import os
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import json
 import pandas as pd
 import datetime
@@ -27,9 +29,37 @@ else:
     print('GitHub Secrets에 NID_AUT, NID_SES를 추가해주세요.')
 
 
+def make_session():
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=['GET'],
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('https://', adapter)
+    return session
+
+
+SESSION = make_session()
+
+
+def safe_get(url, params=None, headers=None, retries=3):
+    for attempt in range(retries):
+        try:
+            r = SESSION.get(url, params=params, headers=headers or HEADERS, timeout=30)
+            return r
+        except requests.exceptions.ConnectionError as e:
+            wait = (attempt + 1) * 5
+            print(f'  연결 오류 (시도 {attempt+1}/{retries}), {wait}초 후 재시도: {e}')
+            time.sleep(wait)
+    raise RuntimeError(f'Failed after {retries} retries: {url}')
+
+
 def get_region_list(cortar_no):
     url = f'https://m.land.naver.com/map/getRegionList?cortarNo={cortar_no}'
-    r = requests.get(url, headers=HEADERS)
+    r = safe_get(url)
     r.encoding = 'utf-8-sig'
     try:
         temp = json.loads(r.text)
@@ -42,7 +72,7 @@ def get_region_list(cortar_no):
 
 def get_apt_list(dong_code):
     url = 'https://m.land.naver.com/complex/ajax/complexListByCortarNo'
-    r = requests.get(url, params={'cortarNo': dong_code, 'realEstateType': 'APT'}, headers=HEADERS)
+    r = safe_get(url, params={'cortarNo': dong_code, 'realEstateType': 'APT'})
     r.encoding = 'utf-8-sig'
     try:
         temp = json.loads(r.text)
@@ -92,7 +122,7 @@ def get_trade_info(apt_code, cortar_no=''):
         page += 1
         parameter['page'] = page
 
-        response = requests.get(URL, params=parameter, headers=header)
+        response = safe_get(URL, params=parameter, headers=header)
         if response.status_code != 200:
             print(f'  Invalid status: {response.status_code} for complex {apt_code}')
             break
