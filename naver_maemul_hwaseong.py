@@ -1,24 +1,20 @@
 import os
 import time
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import subprocess
 import json
 import pandas as pd
 import datetime
 import re
 import random
+from urllib.parse import urlencode
 
 HEADERS = {
     'Accept': 'application/json, text/plain, */*',
-    'Accept-Encoding': 'gzip, deflate, br',
     'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Referer': 'https://m.land.naver.com/',
 }
 
-# 환경변수에서 네이버 로그인 쿠키 읽기 (GitHub Secrets에 저장)
-# NID_AUT, NID_SES: 네이버 로그인 후 브라우저 쿠키에서 복사
 NID_AUT = os.environ.get('NID_AUT', '')
 NID_SES = os.environ.get('NID_SES', '')
 if NID_AUT and NID_SES:
@@ -26,54 +22,66 @@ if NID_AUT and NID_SES:
     print('네이버 로그인 쿠키 적용됨')
 else:
     print('경고: NID_AUT / NID_SES 쿠키 없음 - 매물 목록을 가져올 수 없을 수 있습니다.')
-    print('GitHub Secrets에 NID_AUT, NID_SES를 추가해주세요.')
 
 
-def make_session():
-    session = requests.Session()
-    retry = Retry(
-        total=5,
-        backoff_factor=2,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=['GET'],
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount('https://', adapter)
-    return session
+class _Response:
+    def __init__(self, text, status_code=200):
+        self.text = text
+        self.status_code = status_code
+        self.encoding = 'utf-8'
 
 
-SESSION = make_session()
+def safe_get(url, params=None, headers=None, retries=5):
+    h = headers or HEADERS
+    full_url = url + ('?' + urlencode(params) if params else '')
 
+    cmd = [
+        'curl', '-s', '--max-time', '45', '--compressed',
+        '--tlsv1.2',
+        '-H', f"Accept: {h.get('Accept', 'application/json, text/plain, */*')}",
+        '-H', f"Accept-Language: {h.get('Accept-Language', 'ko-KR,ko;q=0.9,en-US;q=0.8')}",
+        '-H', f"User-Agent: {h.get('User-Agent', '')}",
+        '-H', f"Referer: {h.get('Referer', 'https://m.land.naver.com/')}",
+    ]
+    if h.get('Cookie'):
+        cmd.extend(['-H', f"Cookie: {h['Cookie']}"])
+    cmd.append(full_url)
 
-def safe_get(url, params=None, headers=None, retries=3):
     for attempt in range(retries):
         try:
-            r = SESSION.get(url, params=params, headers=headers or HEADERS, timeout=30)
-            return r
-        except requests.exceptions.ConnectionError as e:
-            wait = (attempt + 1) * 5
-            print(f'  연결 오류 (시도 {attempt+1}/{retries}), {wait}초 후 재시도: {e}')
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=50)
+            if result.returncode == 0 and result.stdout:
+                return _Response(result.stdout)
+            print(f'  curl 실패 (시도 {attempt+1}/{retries}, code={result.returncode}): {result.stderr[:150]}')
+        except subprocess.TimeoutExpired:
+            print(f'  curl 타임아웃 (시도 {attempt+1}/{retries})')
+        except Exception as e:
+            print(f'  오류 (시도 {attempt+1}/{retries}): {e}')
+
+        if attempt < retries - 1:
+            wait = (attempt + 1) * 10
+            print(f'  {wait}초 후 재시도...')
             time.sleep(wait)
-    raise RuntimeError(f'Failed after {retries} retries: {url}')
+
+    raise RuntimeError(f'Failed after {retries} retries: {full_url}')
 
 
 def get_region_list(cortar_no):
     url = f'https://m.land.naver.com/map/getRegionList?cortarNo={cortar_no}'
     r = safe_get(url)
-    r.encoding = 'utf-8-sig'
     try:
         temp = json.loads(r.text)
         rows = [(item['CortarNo'], item['CortarNm']) for item in temp['result']['list']]
         return pd.DataFrame(rows, columns=['cortarNo', 'cortarName'])
     except Exception as e:
         print(f'Error getting region list for {cortar_no}:', e)
+        print(f'  Response: {r.text[:200]}')
         return pd.DataFrame(columns=['cortarNo', 'cortarName'])
 
 
 def get_apt_list(dong_code):
     url = 'https://m.land.naver.com/complex/ajax/complexListByCortarNo'
     r = safe_get(url, params={'cortarNo': dong_code, 'realEstateType': 'APT'})
-    r.encoding = 'utf-8-sig'
     try:
         temp = json.loads(r.text)
         if not temp.get('result'):
@@ -172,7 +180,6 @@ def get_trade_info(apt_code, cortar_no=''):
 
 
 if __name__ == '__main__':
-    # 경기도 자동 선택
     sido_list = get_region_list('0000000000')
     try:
         sido_idx = sido_list[sido_list['cortarName'] == '경기도'].index[0]
@@ -183,17 +190,14 @@ if __name__ == '__main__':
     sido_cortar = sido_list.iloc[sido_idx]['cortarNo']
     print('자동 선택된 시도:', selected_sido)
 
-    # 경기도 군구 목록
     gungu_list = get_region_list(sido_cortar)
 
-    # 화성시 선택 (44번째 항목, 1-indexed)
     gungu_input = '44'
     gungu_choice = int(gungu_input) - 1
     selected_gungu = gungu_list.iloc[gungu_choice]['cortarName']
     gungu_cortar = gungu_list.iloc[gungu_choice]['cortarNo']
     print('자동 선택된 군구:', selected_gungu)
 
-    # 화성시 동 목록
     dong_list = get_region_list(gungu_cortar)
     print(f'총 {len(dong_list)}개 동 처리 시작')
 
@@ -228,7 +232,6 @@ if __name__ == '__main__':
 
     if null_count > 0:
         print(f'\n경고: {null_count}개 단지에서 매물 데이터를 가져오지 못했습니다.')
-        print('GitHub Secrets에 NID_AUT, NID_SES 쿠키 값을 추가하고 workflow에 환경변수로 전달하세요.')
 
     if not all_trade_info:
         print('수집된 데이터가 없습니다. 로그인 쿠키를 설정해주세요.')
