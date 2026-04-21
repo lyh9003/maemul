@@ -19,7 +19,7 @@ NID_AUT = os.environ.get('NID_AUT', '')
 NID_SES = os.environ.get('NID_SES', '')
 if NID_AUT and NID_SES:
     HEADERS['Cookie'] = f'NID_AUT={NID_AUT}; NID_SES={NID_SES}'
-    print('네이버 로그인 쿠키 적용됨')
+    print(f'네이버 로그인 쿠키 적용됨 (NID_AUT 길이:{len(NID_AUT)}, NID_SES 길이:{len(NID_SES)})')
 else:
     print('경고: NID_AUT / NID_SES 쿠키 없음 - 매물 목록을 가져올 수 없을 수 있습니다.')
 
@@ -136,6 +136,8 @@ def get_trade_info(apt_code, cortar_no=''):
             break
 
         raw = response.text.strip()
+        if page == 1 and not lands:
+            print(f'  DEBUG response[{apt_code}]: {raw[:150]}')
         if raw == 'null' or not raw:
             print(f'  No article data for complex {apt_code} (null - login cookie required)')
             break
