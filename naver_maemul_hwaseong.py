@@ -1,12 +1,13 @@
 import os
 import time
-import subprocess
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import json
 import pandas as pd
 import datetime
 import re
 import random
-from urllib.parse import urlencode
 
 HEADERS = {
     'Accept': 'application/json, text/plain, */*',
@@ -19,7 +20,6 @@ NAVER_COOKIES = os.environ.get('NAVER_COOKIES', '')
 NID_AUT = os.environ.get('NID_AUT', '')
 NID_SES = os.environ.get('NID_SES', '')
 if NAVER_COOKIES:
-    # document.cookie는 HttpOnly인 NID_AUT를 포함하지 않으므로 별도로 추가
     cookie = NAVER_COOKIES
     if NID_AUT and 'NID_AUT' not in NAVER_COOKIES:
         cookie = f'{NAVER_COOKIES}; NID_AUT={NID_AUT}'
@@ -32,51 +32,38 @@ else:
     print('경고: 쿠키 없음 - NAVER_COOKIES 또는 NID_AUT/NID_SES Secret을 설정해주세요.')
 
 
-class _Response:
-    def __init__(self, text, status_code=200):
-        self.text = text
-        self.status_code = status_code
-        self.encoding = 'utf-8'
+def make_session():
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=['GET'],
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('https://', adapter)
+    return session
 
 
-def safe_get(url, params=None, headers=None, retries=5):
-    h = headers or HEADERS
-    full_url = url + ('?' + urlencode(params) if params else '')
+SESSION = make_session()
 
-    cmd = [
-        'curl', '-s', '--max-time', '45', '--compressed',
-        '--tlsv1.2',
-        '-H', f"Accept: {h.get('Accept', 'application/json, text/plain, */*')}",
-        '-H', f"Accept-Language: {h.get('Accept-Language', 'ko-KR,ko;q=0.9,en-US;q=0.8')}",
-        '-H', f"User-Agent: {h.get('User-Agent', '')}",
-        '-H', f"Referer: {h.get('Referer', 'https://m.land.naver.com/')}",
-    ]
-    if h.get('Cookie'):
-        cmd.extend(['-H', f"Cookie: {h['Cookie']}"])
-    cmd.append(full_url)
 
+def safe_get(url, params=None, headers=None, retries=3):
     for attempt in range(retries):
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', timeout=50)
-            if result.returncode == 0 and result.stdout:
-                return _Response(result.stdout)
-            print(f'  curl 실패 (시도 {attempt+1}/{retries}, code={result.returncode}): {result.stderr[:150]}')
-        except subprocess.TimeoutExpired:
-            print(f'  curl 타임아웃 (시도 {attempt+1}/{retries})')
-        except Exception as e:
-            print(f'  오류 (시도 {attempt+1}/{retries}): {e}')
-
-        if attempt < retries - 1:
-            wait = (attempt + 1) * 10
-            print(f'  {wait}초 후 재시도...')
+            r = SESSION.get(url, params=params, headers=headers or HEADERS, timeout=30)
+            return r
+        except requests.exceptions.ConnectionError as e:
+            wait = (attempt + 1) * 5
+            print(f'  연결 오류 (시도 {attempt+1}/{retries}), {wait}초 후 재시도: {e}')
             time.sleep(wait)
-
-    raise RuntimeError(f'Failed after {retries} retries: {full_url}')
+    raise RuntimeError(f'Failed after {retries} retries: {url}')
 
 
 def get_region_list(cortar_no):
     url = f'https://m.land.naver.com/map/getRegionList?cortarNo={cortar_no}'
     r = safe_get(url)
+    r.encoding = 'utf-8-sig'
     try:
         temp = json.loads(r.text)
         rows = [(item['CortarNo'], item['CortarNm']) for item in temp['result']['list']]
@@ -90,6 +77,7 @@ def get_region_list(cortar_no):
 def get_apt_list(dong_code):
     url = 'https://m.land.naver.com/complex/ajax/complexListByCortarNo'
     r = safe_get(url, params={'cortarNo': dong_code, 'realEstateType': 'APT'})
+    r.encoding = 'utf-8-sig'
     try:
         temp = json.loads(r.text)
         if not temp.get('result'):
