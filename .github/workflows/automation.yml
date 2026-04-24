@@ -19,6 +19,7 @@ jobs:
 
       - name: Run the crawler script
         env:
+          NAVER_COOKIES: ${{ secrets.NAVER_COOKIES }}
           NID_AUT: ${{ secrets.NID_AUT }}
           NID_SES: ${{ secrets.NID_SES }}
         run: python naver_maemul_hwaseong.py
