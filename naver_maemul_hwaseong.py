@@ -46,6 +46,30 @@ def make_session():
 
 
 SESSION = make_session()
+_bearer_token = None
+
+
+def get_bearer_token():
+    global _bearer_token
+    if _bearer_token:
+        return _bearer_token
+    url = 'https://new.land.naver.com/api/tokens'
+    h = {
+        'Accept': '*/*',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8',
+        'User-Agent': HEADERS['User-Agent'],
+        'Referer': 'https://new.land.naver.com/',
+    }
+    if HEADERS.get('Cookie'):
+        h['Cookie'] = HEADERS['Cookie']
+    try:
+        r = SESSION.get(url, headers=h, timeout=30)
+        _bearer_token = r.json().get('accessToken', '')
+        print(f'Bearer 토큰 발급됨 (길이:{len(_bearer_token)})')
+    except Exception as e:
+        print(f'Bearer 토큰 발급 실패: {e}')
+        _bearer_token = ''
+    return _bearer_token
 
 
 def safe_get(url, params=None, headers=None, retries=3):
@@ -104,29 +128,34 @@ def convert_korean_price_to_number(price_str):
 
 
 def get_trade_info(apt_code, cortar_no=''):
-    URL = 'https://m.land.naver.com/complex/getComplexArticleList'
-    parameter = {
-        'hscpNo': apt_code,
-        'cortarNo': cortar_no,
+    token = get_bearer_token()
+    url = 'https://new.land.naver.com/api/articles'
+    params = {
+        'complexNo': apt_code,
         'tradTpCd': '',
-        'ptpNo': '',
-        'bildNo': '',
-        'order': 'spc_',
-        'showR0': 'N',
         'page': 1,
+        'showArticle': 'false',
+        'sameAddressGroup': 'false',
     }
     header = {
-        **HEADERS,
-        'Referer': f'https://m.land.naver.com/complex/info/{apt_code}',
+        'Accept': '*/*',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8',
+        'User-Agent': HEADERS['User-Agent'],
+        'Referer': f'https://new.land.naver.com/complexes/{apt_code}',
     }
+    if token:
+        header['Authorization'] = f'Bearer {token}'
+    if HEADERS.get('Cookie'):
+        header['Cookie'] = HEADERS['Cookie']
+
     page = 0
     lands = []
 
     while True:
         page += 1
-        parameter['page'] = page
+        params['page'] = page
 
-        response = safe_get(URL, params=parameter, headers=header)
+        response = safe_get(url, params=params, headers=header)
         if response.status_code != 200:
             print(f'  Invalid status: {response.status_code} for complex {apt_code}')
             break
@@ -134,39 +163,39 @@ def get_trade_info(apt_code, cortar_no=''):
         raw = response.text.strip()
         if page == 1 and not lands:
             print(f'  DEBUG response[{apt_code}]: {raw[:150]}')
-        if raw == 'null' or not raw:
-            print(f'  No article data for complex {apt_code} (null - login cookie required)')
+        if not raw or raw == 'null':
             break
 
-        data = json.loads(raw)
-        if data is None:
+        try:
+            data = response.json()
+        except Exception:
+            print(f'  JSON parse error for {apt_code}: {raw[:100]}')
             break
 
-        result = data.get('result')
-        if result is None:
-            print(f'  No result for complex {apt_code}')
+        article_list = data.get('articleList', [])
+        if not article_list:
             break
 
-        for item in result.get('list', []):
-            tradTpNm = item.get('tradTpNm', '')
-            price_info = item.get('prcInfo', '')
+        for item in article_list:
+            tradTpNm = item.get('tradeTypeName', '')
+            price_info = item.get('dealOrWarrantPrc', '')
             numeric_price = (
                 convert_korean_price_to_number(price_info) if tradTpNm != '월세' else price_info
             )
             lands.append([
-                item.get('tradTpNm', ''),
-                item.get('bildNm', ''),
-                item.get('flrInfo', ''),
+                tradTpNm,
+                item.get('buildingName', ''),
+                item.get('floorInfo', ''),
                 numeric_price,
-                item.get('spc1', ''),
-                item.get('vrfcTpCd', ''),
-                item.get('atclFetrDesc', ''),
-                item.get('cfmYmd', ''),
+                item.get('areaName', ''),
+                item.get('verificationType', ''),
+                item.get('articleFeatureDesc', ''),
+                item.get('cpId', ''),
                 item.get('tagList', ''),
                 item.get('direction', ''),
             ])
 
-        if result.get('moreDataYn') == 'N':
+        if not data.get('isMoreData', False):
             break
 
         time.sleep(random.uniform(2, 2.3))
