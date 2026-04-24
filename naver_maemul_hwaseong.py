@@ -35,9 +35,9 @@ else:
 def make_session():
     session = requests.Session()
     retry = Retry(
-        total=5,
+        total=3,
         backoff_factor=2,
-        status_forcelist=[429, 500, 502, 503, 504],
+        status_forcelist=[500, 502, 503, 504],  # 429 제외 - 429는 수동으로 처리
         allowed_methods=['GET'],
     )
     adapter = HTTPAdapter(max_retries=retry)
@@ -62,13 +62,21 @@ def get_bearer_token():
     }
     if HEADERS.get('Cookie'):
         h['Cookie'] = HEADERS['Cookie']
-    try:
-        r = SESSION.get(url, headers=h, timeout=30)
-        _bearer_token = r.json().get('accessToken', '')
-        print(f'Bearer 토큰 발급됨 (길이:{len(_bearer_token)})')
-    except Exception as e:
-        print(f'Bearer 토큰 발급 실패: {e}')
-        _bearer_token = ''
+    for attempt in range(3):
+        try:
+            r = SESSION.get(url, headers=h, timeout=30)
+            if r.status_code == 429:
+                wait = (attempt + 1) * 30
+                print(f'  토큰 429 ({attempt+1}/3), {wait}초 후 재시도...')
+                time.sleep(wait)
+                continue
+            _bearer_token = r.json().get('accessToken', '')
+            print(f'Bearer 토큰 발급됨 (길이:{len(_bearer_token)})')
+            break
+        except Exception as e:
+            print(f'Bearer 토큰 발급 실패: {e}')
+            _bearer_token = ''
+            break
     return _bearer_token
 
 
@@ -76,6 +84,11 @@ def safe_get(url, params=None, headers=None, retries=3):
     for attempt in range(retries):
         try:
             r = SESSION.get(url, params=params, headers=headers or HEADERS, timeout=30)
+            if r.status_code == 429:
+                wait = (attempt + 1) * 30
+                print(f'  429 Rate limit (시도 {attempt+1}/{retries}), {wait}초 후 재시도...')
+                time.sleep(wait)
+                continue
             return r
         except requests.exceptions.ConnectionError as e:
             wait = (attempt + 1) * 5
