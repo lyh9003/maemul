@@ -49,35 +49,22 @@ SESSION = make_session()
 _bearer_token = None
 
 
-def get_bearer_token():
-    global _bearer_token
-    if _bearer_token:
-        return _bearer_token
-    url = 'https://new.land.naver.com/api/tokens'
-    h = {
-        'Accept': '*/*',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8',
-        'User-Agent': HEADERS['User-Agent'],
-        'Referer': 'https://new.land.naver.com/',
-    }
-    if HEADERS.get('Cookie'):
-        h['Cookie'] = HEADERS['Cookie']
-    for attempt in range(3):
+def safe_post(url, body, headers=None, retries=3):
+    h = headers or HEADERS
+    for attempt in range(retries):
         try:
-            r = SESSION.get(url, headers=h, timeout=30)
+            r = SESSION.post(url, json=body, headers=h, timeout=30)
             if r.status_code == 429:
                 wait = (attempt + 1) * 30
-                print(f'  토큰 429 ({attempt+1}/3), {wait}초 후 재시도...')
+                print(f'  429 Rate limit (시도 {attempt+1}/{retries}), {wait}초 후 재시도...')
                 time.sleep(wait)
                 continue
-            _bearer_token = r.json().get('accessToken', '')
-            print(f'Bearer 토큰 발급됨 (길이:{len(_bearer_token)})')
-            break
-        except Exception as e:
-            print(f'Bearer 토큰 발급 실패: {e}')
-            _bearer_token = ''
-            break
-    return _bearer_token
+            return r
+        except requests.exceptions.ConnectionError as e:
+            wait = (attempt + 1) * 5
+            print(f'  연결 오류 (시도 {attempt+1}/{retries}), {wait}초 후 재시도: {e}')
+            time.sleep(wait)
+    raise RuntimeError(f'Failed after {retries} retries: {url}')
 
 
 def safe_get(url, params=None, headers=None, retries=3):
@@ -141,41 +128,43 @@ def convert_korean_price_to_number(price_str):
 
 
 def get_trade_info(apt_code, cortar_no=''):
-    token = get_bearer_token()
-    url = 'https://new.land.naver.com/api/articles'
-    params = {
-        'complexNo': apt_code,
-        'tradTpCd': '',
-        'page': 1,
-        'showArticle': 'false',
-        'sameAddressGroup': 'false',
-    }
+    url = 'https://fin.land.naver.com/front-api/v1/complex/article/list'
     header = {
-        'Accept': '*/*',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Content-Type': 'application/json',
+        'Origin': 'https://fin.land.naver.com',
+        'Referer': 'https://fin.land.naver.com/complexes/' + str(apt_code),
         'User-Agent': HEADERS['User-Agent'],
-        'Referer': f'https://new.land.naver.com/complexes/{apt_code}',
     }
-    if token:
-        header['Authorization'] = f'Bearer {token}'
     if HEADERS.get('Cookie'):
         header['Cookie'] = HEADERS['Cookie']
 
-    page = 0
+    last_info = []
     lands = []
+    page = 0
 
     while True:
         page += 1
-        params['page'] = page
+        body = {
+            'size': 30,
+            'complexNumber': str(apt_code),
+            'tradeTypes': [],
+            'pyeongTypes': [],
+            'dongNumbers': [],
+            'userChannelType': 'PC',
+            'articleSortType': 'PRICE_ASC',
+            'lastInfo': last_info,
+        }
 
-        response = safe_get(url, params=params, headers=header)
+        response = safe_post(url, body=body, headers=header)
         if response.status_code != 200:
             print(f'  Invalid status: {response.status_code} for complex {apt_code}')
             break
 
         raw = response.text.strip()
         if page == 1 and not lands:
-            print(f'  DEBUG response[{apt_code}]: {raw[:150]}')
+            print(f'  DEBUG response[{apt_code}]: {raw[:200]}')
         if not raw or raw == 'null':
             break
 
@@ -185,30 +174,33 @@ def get_trade_info(apt_code, cortar_no=''):
             print(f'  JSON parse error for {apt_code}: {raw[:100]}')
             break
 
-        article_list = data.get('articleList', [])
+        # 응답 구조 파악 후 파싱
+        body_data = data.get('body', data)
+        article_list = body_data.get('list', body_data.get('articleList', []))
         if not article_list:
             break
 
         for item in article_list:
-            tradTpNm = item.get('tradeTypeName', '')
-            price_info = item.get('dealOrWarrantPrc', '')
+            tradTpNm = item.get('tradeTypeName', item.get('tradeType', ''))
+            price_info = item.get('price', item.get('dealOrWarrantPrc', ''))
             numeric_price = (
-                convert_korean_price_to_number(price_info) if tradTpNm != '월세' else price_info
+                convert_korean_price_to_number(str(price_info)) if tradTpNm != '월세' else price_info
             )
             lands.append([
                 tradTpNm,
-                item.get('buildingName', ''),
-                item.get('floorInfo', ''),
+                item.get('buildingName', item.get('dongName', '')),
+                item.get('floorInfo', item.get('floor', '')),
                 numeric_price,
-                item.get('areaName', ''),
+                item.get('exclusiveArea', item.get('areaName', '')),
                 item.get('verificationType', ''),
-                item.get('articleFeatureDesc', ''),
-                item.get('cpId', ''),
-                item.get('tagList', ''),
+                item.get('articleFeatureDescription', item.get('description', '')),
+                item.get('articleConfirmYmd', item.get('cpId', '')),
+                str(item.get('tagList', item.get('tags', ''))),
                 item.get('direction', ''),
             ])
 
-        if not data.get('isMoreData', False):
+        last_info = body_data.get('lastInfo', [])
+        if not last_info:
             break
 
         time.sleep(random.uniform(2, 2.3))
